@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="OpenLayers" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <trk>
+        <name>
+        OpenLayers_Feature_Vector_2743</name>
+        <desc>
+        No description available</desc>
+        <trkseg>
+            <trkpt lon="145.3784220846425" lat="-41.70776428509883"/>
+            <trkpt lon="145.37940913755855" lat="-41.706226425155194"/>
+            <trkpt lon="145.3791945608404" lat="-41.704848727718634"/>
+            <trkpt lon="145.37932330687488" lat="-41.70315059491198"/>
+            <trkpt lon="145.37850791533515" lat="-41.70049116474574"/>
+            <trkpt lon="145.3759329946725" lat="-41.70068341639759"/>
+            <trkpt lon="145.3764479788104" lat="-41.69975419475528"/>
+            <trkpt lon="145.37739211638464" lat="-41.69818410009139"/>
+            <trkpt lon="145.37541801054354" lat="-41.696613967093725"/>
+            <trkpt lon="145.37297183592435" lat="-41.694627213262606"/>
+            <trkpt lon="145.37335807401882" lat="-41.69312108478586"/>
+            <trkpt lon="145.37168437559865" lat="-41.69231993824886"/>
+            <trkpt lon="145.3718989523157" lat="-41.69004462767465"/>
+            <trkpt lon="145.3722422750683" lat="-41.688442247990345"/>
+            <trkpt lon="145.37121230681043" lat="-41.685942455986414"/>
+            <trkpt lon="145.37121230681126" lat="-41.68334641533159"/>
+            <trkpt lon="145.37292892058096" lat="-41.68289770633062"/>
+            <trkpt lon="145.36940986235464" lat="-41.68014128239036"/>
+            <trkpt lon="145.37181312163202" lat="-41.67873097332107"/>
+            <trkpt lon="145.37361556608778" lat="-41.67677572098648"/>
+            <trkpt lon="145.37503177244912" lat="-41.67610258758459"/>
+            <trkpt lon="145.37631923277593" lat="-41.675589719315916"/>
+            <trkpt lon="145.3780787618899" lat="-41.673858758735"/>
+        </trkseg>
+    </trk>
+</gpx>

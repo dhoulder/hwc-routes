@@ -132,22 +132,28 @@ class Uploader:
         original_id = row_dict['id']
         url = form_urls[row_dict.get('route_type', 'walk')]
 
-        data = {k: row_dict[k] for k in fields}
-        data['duration_0'], data['duration_1'] = split_time(row_dict['duration'])
-        data['car_shuttle'] = flag_to_on(row_dict['car_shuttle'])
-        data['private_land'] = flag_to_on(row_dict['private_land'])
-        data['trailhead'] = clean_point(row_dict['trailhead'])
-        data['nomenclature'] = html_to_quill(row_dict['nomenclature'])
-        data['location'] = html_to_quill(row_dict['location'])
-        data['route_details'] = html_to_quill(row_dict['route_details'])
+        try:
+            data = {k: row_dict[k] for k in fields}
+            data['duration_0'], data['duration_1'] = split_time(row_dict['duration'])
+            data['car_shuttle'] = flag_to_on(row_dict['car_shuttle'])
+            data['private_land'] = flag_to_on(row_dict['private_land'])
+            data['trailhead'] = clean_point(row_dict['trailhead'])
+            data['nomenclature'] = html_to_quill(row_dict['nomenclature'])
+            data['location'] = html_to_quill(row_dict['location'])
+            data['route_details'] = html_to_quill(row_dict['route_details'])
 
-        check(data['region'] in regions,
-              f"Bad region: {data['region']}  ({original_id} {data['title']})")
-        lu = data['last_updated'].split('-') # Needs to be like 2024-04-10
-        if lu:
-            check(len(lu) == 3
-                  and int(lu[0]) > 1900 and (0 < int(lu[1]) < 13) and int(lu[2]) < 32,
-                  f'Bad date format {data["last_updated"]} ({original_id} {data["title"]})')
+            check(data['region'] in regions,
+                f"Bad region: {data['region']}  ({original_id} {data['title']})")
+            lu = data['last_updated'].split('-') # Needs to be like 2024-04-10
+            if lu:
+                check(len(lu) == 3
+                    and int(lu[0]) > 1900 and (0 < int(lu[1]) < 13) and int(lu[2]) < 32,
+                    f'Bad date format {data["last_updated"]} ({original_id} {data["title"]})')
+        except (RuntimeError, IndexError, ValueError) as e:
+            print(f"Bad row (id={original_id}): {e}")
+            return
+        except KeyError as e:
+            raise RuntimeError(f"Missing column in {self.args.excel_file}: {e}")
 
         data.update(gpx_management)
         files = {}

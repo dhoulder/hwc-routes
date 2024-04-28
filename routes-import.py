@@ -42,7 +42,7 @@ fields = (
     'land_owner',
     'start_location',
     'end_location',
-    # 'car_shuttle', #  Translate 1, 0 to "on", otherwise blank
+    # 'car_shuttle', #  Translate 1 to "on", otherwise blank
     'driving_distance_km',
     #'trailhead',  # Needs to be like POINT (147.30860923899715 -42.86577574650763)
     'track',

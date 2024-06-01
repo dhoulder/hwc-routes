@@ -10,15 +10,16 @@ commercial entity and this was going to be cost prohibitive.
 Instead, we do it client-side and use the requests module to POST the data into
 the route-creation form as a human would.
 """
+import sys
 import argparse
 import re
 import requests
 import pandas
-import bleach
 import json
 import html
 import time
-
+import glob
+from datetime import datetime
 from getpass import getpass
 from pathlib import Path
 
@@ -29,30 +30,6 @@ form_urls = dict(walk='https://www.hobartwalkingclub.org.au/portal/routes/walk/a
                  cycle='https://www.hobartwalkingclub.org.au/portal/routes/cycle/add')
 
 throttle = 1 # Seconds between requests to avoid triggering any HTTP rate limiting
-
-fields = (
-    'title',
-    'region',
-    'grade',
-    'distance_km',
-    'height',
-    'peak_altitude',
-    # 'duration', # Needs to be split into  duration_0, duration_1.
-    # 'private_land', #  Translate 1 to "on", otherwise blank
-    'land_owner',
-    'start_location',
-    'end_location',
-    # 'car_shuttle', #  Translate 1 to "on", otherwise blank
-    'driving_distance_km',
-    #'trailhead',  # Needs to be like POINT (147.30860923899715 -42.86577574650763)
-    'track',
-    'route_info',
-    'last_updated',
-    'maps',
-    # 'nomenclature', # See html_to_quill()
-    # 'location',
-    #'route_details'
-    )
 
 regions = (
     "North West Tasmania",
@@ -66,6 +43,10 @@ regions = (
     "kunanyi / Mt Wellington"
 )
 
+grades = (
+    "", "SNQ", "NQ", "SE", "SM", "SR", "ME", "MM", "MR", "LM", "LR", "S", "M", "L"
+)
+
 gpx_management = {
     'gpx_uploads-INITIAL_FORMS': 0,
     'gpx_uploads-MIN_NUM_FORMS': 0,
@@ -73,42 +54,42 @@ gpx_management = {
     'gpx_uploads-TOTAL_FORMS': 0
 }
 
-def html_to_quill(html_str):
+def warn_sus_text(label, text):
+    if re.search(r'<[a-zA-Z][^<>]*>', text):
+        print(f"{label}: May be HTML", file=sys.stderr)
+
+def text_to_quill(text):
     # See https://quilljs.com/docs/delta/ https://github.com/leehanyeong/django-quill-editor
-    clean_html = bleach.clean(html_str, tags={'p'}, attributes=[], strip=True)
-    lines = html.unescape(
-        re.sub('\n+', '\n',
-               re.sub(r'</?p *>', '\n',
-                      clean_html.replace('\n', ' ')).lstrip('\n') + '\n'))
+    lines = re.sub('\n+', '\n', text.strip('\n'))
+    clean_html = '\n'.join([f'<p>{html.escape(ln)}</p>'
+                           for ln in lines.split('\n')])
     return json.dumps(dict(
-        delta=json.dumps(dict(ops=[{'insert':lines}])),
+        delta=json.dumps(dict(ops=[{'insert':lines + '\n'}])),
         html=clean_html))
 
 def split_time(hms_string):
-    # Parse duration like '4:00:00
     if not hms_string:
         return '', ''
-    hms = hms_string.split(':')
-    # Minutes have to be a multiple of 15
-    m = round((int(hms[0]) * 60 + int(hms[1])) / 15) * 15
+    if ':' in hms_string:
+        # Parse duration like '4:00:00
+        hms = hms_string.split(':')
+        # Minutes have to be a multiple of 15
+        m = round((int(hms[0]) * 60 + int(hms[1])) / 15) * 15
+    else:
+        # assume decimal
+        m = round((60 * float(hms_string)) / 15) * 15
     return str(m // 60), str(m % 60)
-
-def clean_point(point_string):
-    # Translate from SRID=4326;POINT (146.62542930877686 -42.676847280577576) to
-    # POINT (146.62542930877686 -42.676847280577576)
-    return point_string and re.search(
-        r'(\bPOINT\b.*)', point_string, flags=re.IGNORECASE).group(1)
-
-def flag_to_on(v):
-    return 'on' if v not in {'', '0'} else ''
 
 def extract_csrf_token(html_str):
     return re.search(
         r'<input\s+type="hidden"\s+name="csrfmiddlewaretoken"\s+value="([^"]+)"\s*>',
         html_str).group(1)
 
-def check(ok, message):
+def check(ok, message=None):
     if not ok: raise RuntimeError(message)
+
+def to_int(v):
+    return v and str(round(float(v)))
 
 class Uploader:
     session = None
@@ -118,48 +99,94 @@ class Uploader:
         self.session = requests.Session()
         r = self.session.get(login_url)
         check(r.status_code == 200, f'Login page inaccessible ({r.status_code})')
-        data = dict(csrfmiddlewaretoken	= extract_csrf_token(r.text),
-                    login=args.username, password=password)
-        time.sleep(throttle)
-        r = self.session.post(login_url, data=data, headers={'referer': login_url})
-        check(r.status_code == 200, f'Login failed ({r.status_code})')
-        check(r.url == landing_page, f'Login failed (redirected to {r.url})')
-        self.header = header
+        if password:
+            data = dict(csrfmiddlewaretoken	= extract_csrf_token(r.text),
+                        login=args.username, password=password)
+            time.sleep(throttle)
+            r = self.session.post(login_url, data=data, headers={'referer': login_url})
+            check(r.status_code == 200, f'Login failed ({r.status_code})')
+            check(r.url == landing_page, f'Login failed (redirected to {r.url})')
+        # Sanitise column labels to xxxx or xxxx_yyyy
+        self.header = ['_'.join(h.lower().strip().split()[:2])
+                       for h in header]
+        self.errors = []
+
+    def check_call(self, func, message, *args, fail_val=None,):
+        try:
+            return func(*args)
+        except (RuntimeError, IndexError, ValueError, TypeError) as e:
+            self.errors.append(f"{message}: {', '.join(args)}")
+            return fail_val
 
     def process_row(self, row):
-        row_dict = dict(zip(self.header,
-                            (('' if pandas.isna(c) else str(c).strip()) for c in row)))
-        original_id = row_dict['id']
+        row_dict = dict(
+            zip(self.header,
+                (('' if pandas.isna(c) else str(c).strip())
+                 for c in row)))
         url = form_urls[row_dict.get('route_type', 'walk')]
+        last_updated = datetime.now().strftime('%Y-%m-%d')
 
+        data = {}
+        self.errors = []
         try:
-            data = {k: row_dict[k] for k in fields}
-            data['duration_0'], data['duration_1'] = split_time(row_dict['duration'])
-            data['car_shuttle'] = flag_to_on(row_dict['car_shuttle'])
-            data['private_land'] = flag_to_on(row_dict['private_land'])
-            data['trailhead'] = clean_point(row_dict['trailhead'])
-            data['nomenclature'] = html_to_quill(row_dict['nomenclature'])
-            data['location'] = html_to_quill(row_dict['location'])
-            data['route_details'] = html_to_quill(row_dict['route_details'])
+            original_id = row_dict['route_no']
+            title = row_dict['route_name']
 
-            check(data['region'] in regions,
-                f"Bad region: {data['region']}  ({original_id} {data['title']})")
-            lu = data['last_updated'].split('-') # Needs to be like 2024-04-10
-            if lu:
-                check(len(lu) == 3
-                    and int(lu[0]) > 1900 and (0 < int(lu[1]) < 13) and int(lu[2]) < 32,
-                    f'Bad date format {data["last_updated"]} ({original_id} {data["title"]})')
-        except (RuntimeError, IndexError, ValueError) as e:
-            print(f"Bad row (id={original_id}): {e}")
-            return
+            self.check_call(regions.index, "Bad region", row_dict['region'])
+            self.check_call(grades.index, "Bad grade", row_dict['grade'])
+            h_m = self.check_call(split_time, "Bad time", row_dict['duration'],
+                                  fail_val=(None, None))
+            for k in ('distance', 'height_gain', 'drive_distance'):
+                self.check_call(lambda v: v and float(v),
+                                f"Bad {k}", row_dict[k])
+
+            for k in 'location', 'description':
+                warn_sus_text(f"Route {original_id} {k}", row_dict[k])
+            location = text_to_quill(row_dict['location'])
+            route_details = text_to_quill(row_dict['description'])
+
+            data['title'] = title
+            data['region'] = row_dict['region']
+            data['grade'] = row_dict['grade']
+            data['distance_km'] = row_dict['distance']
+            data['height'] = to_int(row_dict['height_gain'])
+            data['peak_altitude'] = ''
+            data['duration_0'], data['duration_1'] = h_m
+            data['private_land'] = 'on' if row_dict['land_owner'] else ''
+            data['land_owner'] = row_dict['land_owner']
+            data['start_location'] = row_dict['start']
+            data['end_location'] = ''
+            data['car_shuttle'] = ''
+            data['driving_distance_km'] = to_int(row_dict['drive_distance'])
+            data['trailhead'] = ''
+            data['track'] = ''
+            data['route_info'] = row_dict['author']
+            data['last_updated'] = last_updated
+            data['maps'] = row_dict['map_details']
+            data['nomenclature'] = text_to_quill('')
+            data['location'] = location
+            data['route_details'] = route_details
+
+            if self.errors:
+                print(f"Route no {original_id}: {'. '.join(self.errors)}",
+                      file=sys.stderr)
+                return
         except KeyError as e:
             raise RuntimeError(f"Missing column in {self.args.excel_file}: {e}")
 
         data.update(gpx_management)
         files = {}
-        gpx_filename = f'{original_id}.gpx'
-        gpx_path = Path(self.args.gpx_dir) / gpx_filename
-        if gpx_path.is_file():
+        gpx_path = ''
+        if row_dict['gps_plot'].lower() in ('y', 'yes', '1'):
+            matches = glob.glob(
+                f'{original_id}.gpx', root_dir=self.args.gpx_dir) + glob.glob(
+                f'{original_id}[ -_]*.gpx', root_dir=self.args.gpx_dir)
+            if len(matches) != 1:
+                print(f"Route no {original_id}: {matches and 'Multiple' or 'No'} GPX files: {matches}",
+                      file=sys.stderr)
+                return
+            gpx_filename = matches[0]
+            gpx_path = Path(self.args.gpx_dir) / gpx_filename
             files = {'gpx_uploads-0-gpx_file':
                     (gpx_filename, gpx_path.open(), 'application/gpx+xml')}
             data['gpx_uploads-TOTAL_FORMS'] = 1
@@ -173,6 +200,7 @@ class Uploader:
                     print(k, ':', v)
 
         if self.args.dry_run:
+            print(f"Route {original_id} {gpx_path}")
             return
 
         time.sleep(throttle)
@@ -188,11 +216,12 @@ class Uploader:
         if re.search('/portal/routes/[0-9]+/$', r.url):
             print(f'Created {r.url} from route {original_id} {data["title"]}')
         else:
-            print(f'Upload failed ({original_id} {data["title"]}, {r.url})')
+            print(f'Upload failed ({original_id} {data["title"]}, {r.url})',
+                  file=sys.stderr)
             # Form validation errors are reported like
             # <ul class="errorlist"><li>Select a valid choice. xxx is not one of the available choices.</li></ul>
             for err in re.findall(r'(<ul\b[^>]+?\berrorlist\b.*?</ul>)', r.text):
-                print(err)
+                print(err, file=sys.stderr)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -200,6 +229,10 @@ def main():
                         help="Log in, check spreadsheet but don't upload anything")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
+    parser.add_argument("-s", "--start", action="store", type=int,
+                        help="Start row (first row is 1)", default=1)
+    parser.add_argument("-e", "--end", action="store", type=int,
+                        help="Last row", default=None)
     parser.add_argument("username", help="HWC login username")
     parser.add_argument("excel_file", help="Spreadsheet filename")
     parser.add_argument("gpx_dir", help="Directory containing GPX files")
@@ -208,9 +241,9 @@ def main():
     routes = pandas.read_excel(args.excel_file)
     header = routes.columns.tolist()
 
-    password = getpass()
+    password = None if args.dry_run else getpass()
     u = Uploader(args, password, header)
-    for index, row in routes.iterrows():
+    for _, row in routes[args.start-1:args.end].iterrows():
         u.process_row(row)
 
 if __name__ == "__main__":

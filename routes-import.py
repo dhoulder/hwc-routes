@@ -19,7 +19,7 @@ import json
 import html
 import time
 import glob
-from datetime import datetime
+import gpxpy
 from getpass import getpass
 from pathlib import Path
 
@@ -100,7 +100,7 @@ class Uploader:
         r = self.session.get(login_url)
         check(r.status_code == 200, f'Login page inaccessible ({r.status_code})')
         if password:
-            data = dict(csrfmiddlewaretoken	= extract_csrf_token(r.text),
+            data = dict(csrfmiddlewaretoken=extract_csrf_token(r.text),
                         login=args.username, password=password)
             time.sleep(throttle)
             r = self.session.post(login_url, data=data, headers={'referer': login_url})
@@ -124,14 +124,14 @@ class Uploader:
                 (('' if pandas.isna(c) else str(c).strip())
                  for c in row)))
         url = form_urls[row_dict.get('route_type', 'walk')]
-        last_updated = datetime.now().strftime('%Y-%m-%d')
 
         data = {}
         self.errors = []
         try:
             original_id = row_dict['route_no']
             title = row_dict['route_name']
-
+            if len(title) > 30:
+                self.errors.append("Route name is too long")
             self.check_call(regions.index, "Bad region", row_dict['region'])
             self.check_call(grades.index, "Bad grade", row_dict['grade'])
             h_m = self.check_call(split_time, "Bad time", row_dict['duration'],
@@ -161,7 +161,7 @@ class Uploader:
             data['trailhead'] = ''
             data['track'] = ''
             data['route_info'] = row_dict['author']
-            data['last_updated'] = last_updated
+            data['last_updated'] = ''
             data['maps'] = row_dict['map_details']
             data['nomenclature'] = text_to_quill('')
             data['location'] = location
@@ -192,7 +192,19 @@ class Uploader:
             data['gpx_uploads-TOTAL_FORMS'] = 1
             data['gpx_uploads-0-id'] = ''
             data['gpx_uploads-0-route'] = ''
-
+            try:
+                gpx = gpxpy.parse(gpx_path.open())
+            except gpxpy.gpx.GPXException as e:
+                print(f"Bad GPX file {gpx_path}: {e}", file=sys.stderr)
+                return
+            timestamp = min((
+                seg.points[0].time
+                for trk in gpx.tracks
+                for seg in trk.segments
+                if seg.points[0].time),
+                default=None)
+            if timestamp:
+                data['last_updated'] = timestamp.strftime('%Y-%m-%d')
         if self.args.verbose:
             print('')
             for o in data, files:

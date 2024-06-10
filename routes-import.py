@@ -204,7 +204,7 @@ class Uploader:
                 if seg.points[0].time),
                 default=None)
             if timestamp:
-                data['last_updated'] = timestamp.strftime('%Y-%m-%d')
+                data['last_updated'] = timestamp.astimezone().strftime('%Y-%m-%d')
         if self.args.verbose:
             print('')
             for o in data, files:

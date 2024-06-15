@@ -4,6 +4,8 @@ Django web framework. See https://www.djangoproject.com/
 The following POST bodies were gleaned from the firefox network inspector.
 `routes-import.py` has to mimic this.
 
+As of 12 June 2024:
+
 ```
 -----------------------------305967375715017134132847897211
 Content-Disposition: form-data; name="csrfmiddlewaretoken"
@@ -115,6 +117,14 @@ Content-Disposition: form-data; name="location"
 Content-Disposition: form-data; name="route_details"
 
 {"delta":"{\"ops\":[{\"insert\":\"Test route details\\n\"}]}","html":"<p>Test route details</p>"}
+-----------------------------305967375715017134132847897211
+Content-Disposition: form-data; name="original_id"
+
+
+-----------------------------305967375715017134132847897211
+Content-Disposition: form-data; name="status"
+
+Reviewed
 -----------------------------305967375715017134132847897211
 Content-Disposition: form-data; name="gpx_uploads-0-id"
 

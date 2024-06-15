@@ -37,6 +37,7 @@ regions = (
     "Western Tasmania",
     "Cradle - Lake St Clair",
     "Central Plateau",
+    "Midlands",
     "Upper Gordon",
     "Southern Tasmania",
     "South East Tasmania",
@@ -118,6 +119,11 @@ class Uploader:
             self.errors.append(f"{message}: {', '.join(args)}")
             return fail_val
 
+    def find_gpx(self, original_id):
+        return glob.glob(
+            f'{original_id}.gpx', root_dir=self.args.gpx_dir) + glob.glob(
+            f'{original_id}[_ -]*.gpx', root_dir=self.args.gpx_dir)
+
     def process_row(self, row):
         row_dict = dict(
             zip(self.header,
@@ -132,6 +138,7 @@ class Uploader:
             title = row_dict['route_name']
             if len(title) > 30:
                 self.errors.append("Route name is too long")
+            self.check_call(int, "Bad route no.", original_id)
             self.check_call(regions.index, "Bad region", row_dict['region'])
             self.check_call(grades.index, "Bad grade", row_dict['grade'])
             h_m = self.check_call(split_time, "Bad time", row_dict['duration'],
@@ -144,7 +151,11 @@ class Uploader:
                 warn_sus_text(f"Route {original_id} {k}", row_dict[k])
             location = text_to_quill(row_dict['location'])
             route_details = text_to_quill(row_dict['description'])
-
+            if self.errors:
+                print(f"Route no {original_id}: {'. '.join(self.errors)}",
+                      file=sys.stderr)
+                return
+            gps_plot = row_dict['gps_plot']
             data['title'] = title
             data['region'] = row_dict['region']
             data['grade'] = row_dict['grade']
@@ -166,45 +177,42 @@ class Uploader:
             data['nomenclature'] = text_to_quill('')
             data['location'] = location
             data['route_details'] = route_details
-
-            if self.errors:
-                print(f"Route no {original_id}: {'. '.join(self.errors)}",
-                      file=sys.stderr)
-                return
+            data['original_id'] = original_id
+            data['status'] = 'Not Reviewed'
         except KeyError as e:
             raise RuntimeError(f"Missing column in {self.args.excel_file}: {e}")
 
         data.update(gpx_management)
         files = {}
-        gpx_path = ''
-        if row_dict['gps_plot'].lower() in ('y', 'yes', '1'):
-            matches = glob.glob(
-                f'{original_id}.gpx', root_dir=self.args.gpx_dir) + glob.glob(
-                f'{original_id}[ -_]*.gpx', root_dir=self.args.gpx_dir)
-            if len(matches) != 1:
-                print(f"Route no {original_id}: {matches and 'Multiple' or 'No'} GPX files: {matches}",
-                      file=sys.stderr)
-                return
-            gpx_filename = matches[0]
+        timestamp = None
+
+        matches = self.find_gpx(original_id)
+        if not matches:
+            # Handle things like "yes  see 1472"
+            for other_route in re.findall(r'[1-9][0-9]*', gps_plot):
+                matches += self.find_gpx(other_route)
+
+        for i, gpx_filename in enumerate(matches):
             gpx_path = Path(self.args.gpx_dir) / gpx_filename
-            files = {'gpx_uploads-0-gpx_file':
-                    (gpx_filename, gpx_path.open(), 'application/gpx+xml')}
-            data['gpx_uploads-TOTAL_FORMS'] = 1
-            data['gpx_uploads-0-id'] = ''
-            data['gpx_uploads-0-route'] = ''
+            files[f'gpx_uploads-{i}-gpx_file'] = (
+                gpx_filename, gpx_path.open(), 'application/gpx+xml')
+            data[f'gpx_uploads-{i}-id'] = ''
+            data[f'gpx_uploads-{i}-route'] = ''
             try:
                 gpx = gpxpy.parse(gpx_path.open())
             except gpxpy.gpx.GPXException as e:
                 print(f"Bad GPX file {gpx_path}: {e}", file=sys.stderr)
                 return
-            timestamp = min((
-                seg.points[0].time
-                for trk in gpx.tracks
-                for seg in trk.segments
-                if seg.points[0].time),
-                default=None)
-            if timestamp:
-                data['last_updated'] = timestamp.astimezone().strftime('%Y-%m-%d')
+            all_timestamps = [seg.points[0].time
+                    for trk in gpx.tracks
+                    for seg in trk.segments] + [timestamp]
+            timestamp = min((t for t in all_timestamps if t),
+                            default=None)
+
+        if timestamp:
+            data['last_updated'] = timestamp.astimezone().strftime('%Y-%m-%d')
+        data['gpx_uploads-TOTAL_FORMS'] = len(matches)
+
         if self.args.verbose:
             print('')
             for o in data, files:
@@ -212,7 +220,7 @@ class Uploader:
                     print(k, ':', v)
 
         if self.args.dry_run:
-            print(f"Route {original_id} {gpx_path}")
+            print(f"Route {original_id} {title} {matches} {data['last_updated']}")
             return
 
         time.sleep(throttle)
@@ -226,7 +234,7 @@ class Uploader:
         check(r.status_code == 200,
               f'Upload failed ({original_id} {data["title"]}, {r.status_code})')
         if re.search('/portal/routes/[0-9]+/$', r.url):
-            print(f'Created {r.url} from route {original_id} {data["title"]}')
+            print(f'Created {r.url} from route {original_id} {title} {matches} {data["last_updated"]}')
         else:
             print(f'Upload failed ({original_id} {data["title"]}, {r.url})',
                   file=sys.stderr)

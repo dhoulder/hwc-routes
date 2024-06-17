@@ -146,7 +146,9 @@ class Uploader:
             for k in ('distance', 'height_gain', 'drive_distance'):
                 self.check_call(lambda v: v and float(v),
                                 f"Bad {k}", row_dict[k])
-
+            for k in ('start','author'):
+                if len(row_dict[k]) > 255:
+                    self.errors.append(f"{k} is too long")
             for k in 'location', 'description':
                 warn_sus_text(f"Route {original_id} {k}", row_dict[k])
             location = text_to_quill(row_dict['location'])
